@@ -10,35 +10,19 @@ const _schema = i.schema({
     }),
     $users: i.entity({
       email: i.string().unique().indexed().optional(),
-      imageURL: i.string().optional(),
-      type: i.string().optional(),
+      stripeCustomerId: i.string().optional(),
+      subscriptionStatus: i.string().optional(), // 'active' | 'canceled' | 'past_due' | undefined
     }),
-    todos: i.entity({
-      text: i.string(),
-      done: i.boolean(),
-      createdAt: i.number(),
+    posts: i.entity({
+      title: i.string(),
+      content: i.string(),
+      teaser: i.string(),
+      isPremium: i.boolean(),
+      publishedAt: i.number().indexed(),
     }),
   },
-  links: {
-    $usersLinkedPrimaryUser: {
-      forward: {
-        on: "$users",
-        has: "one",
-        label: "linkedPrimaryUser",
-        onDelete: "cascade",
-      },
-      reverse: {
-        on: "$users",
-        has: "many",
-        label: "linkedGuestUsers",
-      },
-    },
-  },
-  rooms: {
-    todos: {
-      presence: i.entity({}),
-    },
-  },
+  links: {},
+  rooms: {},
 });
 
 // This helps TypeScript display nicer intellisense

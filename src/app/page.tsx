@@ -2,168 +2,128 @@
 
 import { db } from "@/lib/db";
 import { type AppSchema } from "@/instant.schema";
-import { id, InstaQLEntity } from "@instantdb/react";
+import { InstaQLEntity } from "@instantdb/react";
+import Link from "next/link";
 
-type Todo = InstaQLEntity<AppSchema, "todos">;
+type Post = InstaQLEntity<AppSchema, "posts">;
 
-const room = db.room("todos");
+function formatDate(timestamp: number) {
+  return new Date(timestamp).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
-function App() {
-  // Read Data
-  const { isLoading, error, data } = db.useQuery({ todos: {} });
-  const { peers } = db.rooms.usePresence(room);
-  const numUsers = 1 + Object.keys(peers).length;
+function PostCard({ post }: { post: Post }) {
+  return (
+    <Link href={`/posts/${post.id}`} className="block group">
+      <article className="p-6 bg-white border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-md transition-all">
+        <div className="flex items-center gap-2 mb-3">
+          <time className="text-sm text-gray-500">
+            {formatDate(post.publishedAt)}
+          </time>
+          {post.isPremium && (
+            <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">
+              Premium
+            </span>
+          )}
+        </div>
+        <h2 className="text-xl font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-2">
+          {post.title}
+        </h2>
+        <p className="text-gray-600 line-clamp-2">{post.teaser}</p>
+      </article>
+    </Link>
+  );
+}
+
+function PostFeed() {
+  const { isLoading, error, data } = db.useQuery({
+    posts: { $: { order: { publishedAt: "desc" } } },
+  });
+
   if (isLoading) {
-    return;
-  }
-  if (error) {
-    return <div className="text-red-500 p-4">Error: {error.message}</div>;
-  }
-  const { todos } = data;
-  return (
-    <div className="font-mono min-h-screen flex justify-center items-center flex-col space-y-4">
-      <div className="text-xs text-gray-500">
-        Number of users online: {numUsers}
-      </div>
-      <h2 className="tracking-wide text-5xl text-gray-300">todos</h2>
-      <div className="border border-gray-300 max-w-xs w-full">
-        <TodoForm todos={todos} />
-        <TodoList todos={todos} />
-        <ActionBar todos={todos} />
-      </div>
-      <div className="text-xs text-center">
-        Open another tab to see todos update in realtime!
-      </div>
-    </div>
-  );
-}
-
-// Write Data
-// ---------
-function addTodo(text: string) {
-  db.transact(
-    db.tx.todos[id()].update({
-      text,
-      done: false,
-      createdAt: Date.now(),
-    }),
-  );
-}
-
-function deleteTodo(todo: Todo) {
-  db.transact(db.tx.todos[todo.id].delete());
-}
-
-function toggleDone(todo: Todo) {
-  db.transact(db.tx.todos[todo.id].update({ done: !todo.done }));
-}
-
-function deleteCompleted(todos: Todo[]) {
-  const completed = todos.filter((todo) => todo.done);
-  const txs = completed.map((todo) => db.tx.todos[todo.id].delete());
-  db.transact(txs);
-}
-
-function toggleAll(todos: Todo[]) {
-  const newVal = !todos.every((todo) => todo.done);
-  db.transact(
-    todos.map((todo) => db.tx.todos[todo.id].update({ done: newVal })),
-  );
-}
-
-// Components
-// ----------
-function ChevronDownIcon() {
-  return (
-    <svg viewBox="0 0 20 20">
-      <path
-        d="M5 8 L10 13 L15 8"
-        stroke="currentColor"
-        fill="none"
-        strokeWidth="2"
-      />
-    </svg>
-  );
-}
-
-function TodoForm({ todos }: { todos: Todo[] }) {
-  return (
-    <div className="flex items-center h-10 border-b border-gray-300">
-      <button
-        className="h-full px-2 border-r border-gray-300 flex items-center justify-center"
-        onClick={() => toggleAll(todos)}
-      >
-        <div className="w-5 h-5">
-          <ChevronDownIcon />
-        </div>
-      </button>
-      <form
-        className="flex-1 h-full"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const input = e.currentTarget.input as HTMLInputElement;
-          addTodo(input.value);
-          input.value = "";
-        }}
-      >
-        <input
-          className="w-full h-full px-2 outline-none bg-transparent"
-          autoFocus
-          placeholder="What needs to be done?"
-          type="text"
-          name="input"
-        />
-      </form>
-    </div>
-  );
-}
-
-function TodoList({ todos }: { todos: Todo[] }) {
-  return (
-    <div className="divide-y divide-gray-300">
-      {todos.map((todo) => (
-        <div key={todo.id} className="flex items-center h-10">
-          <div className="h-full px-2 flex items-center justify-center">
-            <div className="w-5 h-5 flex items-center justify-center">
-              <input
-                type="checkbox"
-                className="cursor-pointer"
-                checked={todo.done}
-                onChange={() => toggleDone(todo)}
-              />
-            </div>
-          </div>
-          <div className="flex-1 px-2 overflow-hidden flex items-center">
-            {todo.done ? (
-              <span className="line-through">{todo.text}</span>
-            ) : (
-              <span>{todo.text}</span>
-            )}
-          </div>
-          <button
-            className="h-full px-2 flex items-center justify-center text-gray-300 hover:text-gray-500"
-            onClick={() => deleteTodo(todo)}
+    return (
+      <div className="space-y-4">
+        {[1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="p-6 bg-gray-50 border border-gray-200 rounded-lg animate-pulse"
           >
-            X
-          </button>
-        </div>
+            <div className="h-4 w-24 bg-gray-200 rounded mb-3" />
+            <div className="h-6 w-3/4 bg-gray-200 rounded mb-2" />
+            <div className="h-4 w-full bg-gray-200 rounded" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 bg-red-50 border border-red-200 rounded-lg text-red-700">
+        Error loading posts: {error.message}
+      </div>
+    );
+  }
+
+  const { posts } = data;
+
+  if (posts.length === 0) {
+    return (
+      <div className="p-6 bg-gray-50 border border-gray-200 rounded-lg text-gray-600 text-center">
+        No posts yet. Check back soon!
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {posts.map((post) => (
+        <PostCard key={post.id} post={post} />
       ))}
     </div>
   );
 }
 
-function ActionBar({ todos }: { todos: Todo[] }) {
+export default function HomePage() {
+  const { user } = db.useAuth();
+
   return (
-    <div className="flex justify-between items-center h-10 px-2 text-xs border-t border-gray-300">
-      <div>Remaining todos: {todos.filter((todo) => !todo.done).length}</div>
-      <button
-        className=" text-gray-300 hover:text-gray-500"
-        onClick={() => deleteCompleted(todos)}
-      >
-        Delete Completed
-      </button>
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white border-b border-gray-200">
+        <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
+          <Link href="/" className="text-xl font-bold text-gray-900">
+            The Weekly Dispatch
+          </Link>
+          <Link
+            href="/account"
+            className="text-sm text-gray-600 hover:text-gray-900"
+          >
+            {user ? "Account" : "Sign In"}
+          </Link>
+        </div>
+      </header>
+
+      <main className="max-w-2xl mx-auto px-4 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Latest Posts
+          </h1>
+          <p className="text-gray-600">
+            Insights and ideas delivered weekly.{" "}
+            {!user && (
+              <Link href="/account" className="text-blue-600 hover:underline">
+                Subscribe for $5/month
+              </Link>
+            )}{" "}
+            to unlock premium content.
+          </p>
+        </div>
+
+        <PostFeed />
+      </main>
     </div>
   );
 }
-
-export default App;

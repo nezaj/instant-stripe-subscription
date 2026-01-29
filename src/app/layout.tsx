@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Create Instant App',
-  description: 'Instant DB Starter App',
+  title: 'The Weekly Dispatch',
+  description: 'Insights and ideas delivered weekly',
 };
 
 export default function RootLayout({
