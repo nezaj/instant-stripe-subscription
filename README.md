@@ -1,26 +1,32 @@
 # The Weekly Dispatch
 
-A mini newsletter app with paid subscriptions. Built with [InstantDB](https://instantdb.com) + [Stripe](https://stripe.com) + Next.js.
+A reference implementation for adding Stripe subscriptions to InstantDB apps.
+
+Recurring payments with auth-based access control — users sign in to subscribe.
+
+## Features
+
+- Stripe Checkout for subscriptions
+- Webhook-based status sync
+- Field-level permissions for premium content
+- Billing portal for subscription management
+- Cancellation handling with grace period
+
+## Docs
+
+- `stripe-strategy.md` — The subscription pattern explained
+- `tutorial.md` — Step-by-step implementation guide
+- `subscription.md` — How the subscription flow works
 
 ## Setup
 
 ```bash
 pnpm install
-```
-
-Copy `.env.example` to `.env` and fill in your InstantDB credentials (should already be there if you used `create-instant-app`).
-
-Push the schema:
-
-```bash
-npx instant-cli push schema --yes
-npx instant-cli push perms --yes
-```
-
-Seed sample posts:
-
-```bash
-source .env && pnpm tsx scripts/seed.ts
+cp .env.example .env.local  # Add your keys
+npx instant-cli push schema
+npx instant-cli push perms
+npx tsx scripts/seed.ts  # Populate sample posts
+pnpm dev
 ```
 
 ## Stripe Setup
@@ -51,18 +57,11 @@ source .env && pnpm tsx scripts/seed.ts
 
 Use test card `4242 4242 4242 4242` with any future expiry and CVC.
 
-## Testing Subscriptions
 
-To manually set a user's subscription status (useful for testing the locked/unlocked states):
+## Scripts
 
 ```bash
-source .env && pnpm tsx scripts/set-subscription.ts user@email.com active
-source .env && pnpm tsx scripts/set-subscription.ts user@email.com canceled
+pnpm dev                        # Start dev server
+npx instant-cli push schema     # Push schema changes
+npx instant-cli push perms      # Push permission changes
 ```
-
-## Project Structure
-
-- `/` — Post feed
-- `/posts/[id]` — Post detail (with paywall for premium)
-- `/account` — Sign in + manage subscription
-- `/api/stripe/*` — Checkout, webhook, and billing portal endpoints
