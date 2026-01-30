@@ -121,6 +121,30 @@ Full list: [Stripe testing docs](https://docs.stripe.com/testing)
 
 ---
 
+## Coupons / Promotion Codes
+
+Create a 100% off coupon to test the production flow without being charged.
+
+### Create a coupon
+
+1. Go to **Products** → **Coupons** → **Create coupon**
+2. Set:
+   - Percentage off: `100%`
+   - Duration: `forever` (or `once` for first month free)
+   - Redemption limits: optional
+3. Click **Create coupon**
+
+### Create a promotion code
+
+1. On the coupon page, go to **Promotion codes** tab
+2. Click **Create code**
+3. Enter a code like `TESTING100`
+4. Save
+
+Users will see "Add promotion code" on the checkout page.
+
+---
+
 ## Testing Subscription Flows
 
 Make sure `stripe listen` is running and your app is on `localhost:3000`.

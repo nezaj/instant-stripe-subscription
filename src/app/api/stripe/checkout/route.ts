@@ -72,6 +72,7 @@ export async function POST(request: NextRequest) {
       customer: customerId,
       mode: "subscription",
       line_items: [{ price: getPriceId(), quantity: 1 }],
+      allow_promotion_codes: true,
       success_url: `${request.headers.get("origin")}/account?success=true`,
       cancel_url: `${request.headers.get("origin")}/account?canceled=true`,
       metadata: { instantUserId: userId },
