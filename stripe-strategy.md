@@ -1,298 +1,117 @@
-# Stripe Integration Strategy
+# Stripe Strategy for Subscriptions
 
-This document explains how payments and subscriptions work in this app.
+A simple pattern for adding Stripe subscriptions to InstantDB apps.
 
-## Philosophy
-
-**Stripe is the source of truth.** Our database (InstantDB) is a cache of Stripe's state. Whenever there's uncertainty, we fetch from Stripe and update our cache.
-
-This avoids "split-brain" issues where Stripe says one thing and our database says another.
-
-## Data Model
+## The Pattern
 
 ```
-┌─────────────────────────────────────┐
-│              $users                 │
-├─────────────────────────────────────┤
-│  id                    string       │
-│  email                 string       │
-│  stripeCustomerId      string  ─────┼──────┐
-│  subscriptionStatus    string       │      │
-│  cancelAt              number       │      │
-└─────────────────────────────────────┘      │
-                                             │
-                    ┌────────────────────────┘
-                    │
-                    ▼
-         ┌─────────────────────┐
-         │   Stripe Customer   │
-         ├─────────────────────┤
-         │  id                 │
-         │  email              │
-         │  subscriptions[] ───┼────────┐
-         └─────────────────────┘        │
-                                        │
-                    ┌───────────────────┘
-                    │
-                    ▼
-         ┌─────────────────────┐
-         │  Stripe Subscription│
-         ├─────────────────────┤
-         │  id                 │
-         │  status             │
-         │  cancel_at          │
-         └─────────────────────┘
+1. User signs in (required — subscriptions are tied to accounts)
+2. User clicks "Subscribe"
+3. Create/fetch Stripe customer, link to InstantDB user
+4. Redirect to Stripe checkout
+5. User pays → webhook updates subscriptionStatus
+6. Success page syncs eagerly (beats webhook race)
+7. Query with auth → premium content unlocked
 ```
 
-We store minimal Stripe data on the user:
-- `stripeCustomerId` — links to Stripe
-- `subscriptionStatus` — "active", "canceled", etc.
-- `cancelAt` — timestamp when subscription ends (if canceling)
+**The key idea:** Stripe is the source of truth. Our database is a cache. When uncertain, fetch from Stripe and update our cache.
 
-## Subscription Flow
+## Three Moving Parts
 
+**1. Checkout API** — Get or create Stripe customer, create session
+```ts
+let customerId = user.stripeCustomerId;
+if (!customerId) {
+  const customer = await stripe.customers.create({ email: user.email });
+  customerId = customer.id;
+  await adminDb.transact(
+    adminDb.tx.$users[userId].update({ stripeCustomerId: customerId })
+  );
+}
+
+stripe.checkout.sessions.create({
+  customer: customerId,
+  mode: "subscription",
+  metadata: { instantUserId: userId },
+});
 ```
-┌──────┐          ┌─────┐          ┌────────────────────┐          ┌────────┐          ┌───────────┐
-│ User │          │ App │          │ /api/stripe/checkout│         │ Stripe │          │ InstantDB │
-└──┬───┘          └──┬──┘          └─────────┬──────────┘          └───┬────┘          └─────┬─────┘
-   │                 │                       │                         │                      │
-   │ Click Subscribe │                       │                         │                      │
-   │────────────────>│                       │                         │                      │
-   │                 │                       │                         │                      │
-   │                 │  POST { userId }      │                         │                      │
-   │                 │──────────────────────>│                         │                      │
-   │                 │                       │                         │                      │
-   │                 │                       │  No customer? Create    │                      │
-   │                 │                       │────────────────────────>│                      │
-   │                 │                       │                         │                      │
-   │                 │                       │  Save stripeCustomerId  │                      │
-   │                 │                       │─────────────────────────┼─────────────────────>│
-   │                 │                       │                         │                      │
-   │                 │                       │  Has subscription?      │                      │
-   │                 │                       │────────────────────────>│                      │
-   │                 │                       │                         │                      │
-   │                 │                       │◄────────────────────────│                      │
-   │                 │                       │                         │                      │
-   │                 │    ┌──────────────────┴──────────────────┐      │                      │
-   │                 │    │ If has subscription → portal URL    │      │                      │
-   │                 │    │ If no subscription → checkout URL   │      │                      │
-   │                 │    └──────────────────┬──────────────────┘      │                      │
-   │                 │                       │                         │                      │
-   │                 │◄──────────────────────│                         │                      │
-   │                 │                       │                         │                      │
-   │  Redirect to Stripe                     │                         │                      │
-   │◄────────────────│                       │                         │                      │
-   │                 │                       │                         │                      │
-   │  Complete payment                       │                         │                      │
-   │────────────────────────────────────────────────────────────────>│                      │
-   │                 │                       │                         │                      │
-   │  Redirect to /account?success=true      │                         │                      │
-   │◄────────────────────────────────────────────────────────────────│                      │
-   │                 │                       │                         │                      │
-   │                 │  POST /api/stripe/sync│                         │                      │
-   │                 │──────────────────────>│  Fetch subscription     │                      │
-   │                 │                       │────────────────────────>│                      │
-   │                 │                       │◄────────────────────────│                      │
-   │                 │                       │  Update status          │                      │
-   │                 │                       │─────────────────────────┼─────────────────────>│
-   │                 │                       │                         │                      │
-   │                 │                       │    Webhook (backup)     │                      │
-   │                 │                       │◄────────────────────────│                      │
-   │                 │                       │                         │                      │
+
+**2. Webhook** — Update subscription status on all changes
+```ts
+// checkout.session.completed
+await adminDb.transact(
+  adminDb.tx.$users[userId].update({ subscriptionStatus: "active" })
+);
+
+// customer.subscription.updated (find user by stripeCustomerId first)
+await adminDb.transact(
+  adminDb.tx.$users[userId].update({ subscriptionStatus: subscription.status })
+);
+
+// customer.subscription.deleted
+await adminDb.transact(
+  adminDb.tx.$users[userId].update({ subscriptionStatus: "canceled" })
+);
 ```
+
+**3. Sync on Success** — Beat the webhook race
+```ts
+useEffect(() => {
+  if (success && user) {
+    fetch("/api/stripe/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user.id }),
+    });
+  }
+}, [success, user]);
+```
+
+## Access Control
+
+Use InstantDB permissions with `auth`
+
+```ts
+// instant.perms.ts
+const rules = {
+  posts: {
+    allow: { view: "true" },
+    bind: ["isSubscriber", "auth.subscriptionStatus == 'active'"],
+    fields: {
+      content: "!data.isPremium || isSubscriber"
+    }
+  }
+};
+```
+
+Query normally — permissions are automatic:
+```ts
+db.useQuery({ posts: {} });
+```
+
+Subscribed user → `content` returned. Unsubscribed → omitted.
 
 ## Sync Strategy
 
-We sync Stripe data to our database in multiple places:
+Sync Stripe data in multiple places:
+
+| Location | Why |
+|----------|-----|
+| Checkout route | Catch existing subs before creating duplicates |
+| Portal route | Sync before billing portal (catches cancellations) |
+| Success page | Beat the webhook race |
+| Webhook | Backup for all Stripe events |
+
+## Cancellation States
 
 ```
-                            ┌─────────────────┐
-                            │   User Action   │
-                            └────────┬────────┘
-                                     │
-                                     ▼
-                    ┌────────────────────────────────┐
-                    │         Which action?          │
-                    └────────────────────────────────┘
-                       │         │         │         │
-          ┌────────────┘         │         │         └────────────┐
-          │                      │         │                      │
-          ▼                      ▼         ▼                      ▼
-   ┌─────────────┐    ┌─────────────┐ ┌─────────────┐    ┌─────────────┐
-   │  Checkout   │    │   Portal    │ │   Success   │    │   Webhook   │
-   │   Route     │    │   Route     │ │    Page     │    │   Handler   │
-   └──────┬──────┘    └──────┬──────┘ └──────┬──────┘    └──────┬──────┘
-          │                  │               │                  │
-          └──────────────────┴───────┬───────┴──────────────────┘
-                                     │
-                                     ▼
-                          ┌─────────────────────┐
-                          │   Sync from Stripe  │
-                          │                     │
-                          │  1. Fetch sub data  │
-                          │  2. Update InstantDB│
-                          └─────────────────────┘
+Active ──[cancels]──▶ Canceling ──[period ends]──▶ Canceled
+   ▲                      │                            │
+   └──────────────────────┴────────[resubscribes]──────┘
 ```
 
-### Why sync in multiple places?
-
-1. **Checkout route** — Catches existing subscriptions before creating duplicates
-2. **Portal route** — Syncs before user sees billing portal (catches cancellations)
-3. **Success page** — Eagerly syncs after payment (beats the webhook race)
-4. **Webhook** — Backup for all Stripe events
-
-## Webhook Events
-
-We listen for these events:
-
-| Event | What it means |
-|-------|---------------|
-| `checkout.session.completed` | User finished checkout |
-| `customer.subscription.updated` | Subscription changed (canceled, renewed, etc.) |
-| `customer.subscription.deleted` | Subscription fully ended |
-
-## Content Protection
-
-Premium content is protected at the **database level**, not just UI:
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        User requests post                           │
-└────────────────────────────────┬────────────────────────────────────┘
-                                 │
-                                 ▼
-                    ┌────────────────────────┐
-                    │  InstantDB Permission  │
-                    │                        │
-                    │  posts.content rule:   │
-                    │  "!data.isPremium ||   │
-                    │   auth.subscriptionStatus│
-                    │   == 'active'"         │
-                    └───────────┬────────────┘
-                                │
-               ┌────────────────┼────────────────┐
-               │                │                │
-               ▼                ▼                ▼
-        ┌────────────┐   ┌────────────┐   ┌────────────┐
-        │ Not premium│   │  Premium + │   │  Premium + │
-        │            │   │ subscribed │   │    NOT     │
-        │            │   │            │   │ subscribed │
-        └─────┬──────┘   └─────┬──────┘   └─────┬──────┘
-              │                │                │
-              ▼                ▼                ▼
-        ┌────────────┐   ┌────────────┐   ┌────────────┐
-        │  Return    │   │  Return    │   │  Return    │
-        │  content   │   │  content   │   │   null     │
-        └─────┬──────┘   └─────┬──────┘   └─────┬──────┘
-              │                │                │
-              └────────────────┼────────────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │   App checks if     │
-                    │   content exists    │
-                    └──────────┬──────────┘
-                               │
-              ┌────────────────┴────────────────┐
-              │                                 │
-              ▼                                 ▼
-     ┌─────────────────┐              ┌─────────────────┐
-     │  content != null│              │  content == null│
-     │                 │              │                 │
-     │  Show full      │              │  Show teaser +  │
-     │  article        │              │  paywall        │
-     └─────────────────┘              └─────────────────┘
-```
-
-## Handling Edge Cases
-
-### Test mode vs Live mode
-
-Stripe test and live modes are completely separate. A test mode `stripeCustomerId` won't work in live mode.
-
-We handle this by catching "No such customer" errors and auto-healing:
-
-```
-┌─────────────────────┐
-│  API call to Stripe │
-└──────────┬──────────┘
-           │
-           ▼
-   ┌───────────────┐
-   │   Customer    │
-   │   exists?     │
-   └───────┬───────┘
-           │
-     ┌─────┴─────┐
-     │           │
-     ▼           ▼
-   ┌───┐      ┌─────┐
-   │Yes│      │ No  │
-   └─┬─┘      └──┬──┘
-     │           │
-     │           ▼
-     │    ┌─────────────────┐
-     │    │ Clear local     │
-     │    │ stripeCustomerId│
-     │    └────────┬────────┘
-     │             │
-     │             ▼
-     │    ┌─────────────────┐
-     │    │ Create new      │
-     │    │ customer        │
-     │    └────────┬────────┘
-     │             │
-     └──────┬──────┘
-            │
-            ▼
-   ┌─────────────────┐
-   │ Continue normally│
-   └─────────────────┘
-```
-
-### Cancellation States
-
-```
-                              ┌─────────────────┐
-                              │ No Subscription │
-                              └────────┬────────┘
-                                       │
-                                       │ Subscribes
-                                       ▼
-                    Renews    ┌─────────────────┐
-               ┌──────────────│     Active      │◄─────────────┐
-               │              └────────┬────────┘              │
-               │                       │                       │
-               │          Cancels      │      Immediate        │ Resubscribes
-               │       (end of period) │        cancel         │
-               │                       ▼                       │
-               │              ┌─────────────────┐              │
-               └──────────────│    Canceling    │              │
-                              └────────┬────────┘              │
-                                       │                       │
-                                       │ Period ends           │
-                                       ▼                       │
-                              ┌─────────────────┐              │
-                              │    Canceled     │──────────────┘
-                              └─────────────────┘
-```
-
-- **Active** — Full access, green badge
-- **Canceling** — Still has access until `cancelAt` date, yellow badge
+- **Active** — Full access
+- **Canceling** — Still has access until `cancelAt` date
 - **Canceled** — No access, must resubscribe
 
-## File Structure
-
-```
-src/app/api/stripe/
-├── checkout/route.ts  # Creates checkout sessions
-├── portal/route.ts    # Opens billing portal
-├── sync/route.ts      # Syncs user data from Stripe
-└── webhook/route.ts   # Handles Stripe events
-
-scripts/
-├── sync-stripe.ts          # Sync all users or one user
-├── set-subscription.ts     # Manually set status (testing)
-├── cancel-subscription.ts  # Cancel in Stripe + sync
-└── clear-stripe-data.ts    # Clear local Stripe data
-```
+Use `cancelAt` timestamp to show "ends on [date]" message.
