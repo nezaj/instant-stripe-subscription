@@ -39,32 +39,57 @@ export async function POST(request: NextRequest) {
     }
 
     // Check for existing active subscription
-    const subscriptions = await stripe.subscriptions.list({
-      customer: customerId,
-      status: "active",
-      limit: 1,
-    });
-
-    const existing = subscriptions.data[0] as
-      | (typeof subscriptions.data)[0] & { cancel_at: number | null }
-      | undefined;
-
-    if (existing) {
-      // Sync local data with Stripe
-      await adminDb.transact(
-        adminDb.tx.$users[userId].update({
-          subscriptionStatus: existing.status,
-          cancelAt: existing.cancel_at,
-        })
-      );
-
-      // Send to portal to manage existing subscription
-      const portalSession = await stripe.billingPortal.sessions.create({
+    try {
+      const subscriptions = await stripe.subscriptions.list({
         customer: customerId,
-        return_url: `${request.headers.get("origin")}/account`,
+        status: "active",
+        limit: 1,
       });
 
-      return NextResponse.json({ url: portalSession.url });
+      const existing = subscriptions.data[0] as
+        | (typeof subscriptions.data)[0] & { cancel_at: number | null }
+        | undefined;
+
+      if (existing) {
+        // Sync local data with Stripe
+        await adminDb.transact(
+          adminDb.tx.$users[userId].update({
+            subscriptionStatus: existing.status,
+            cancelAt: existing.cancel_at,
+          })
+        );
+
+        // Send to portal to manage existing subscription
+        const portalSession = await stripe.billingPortal.sessions.create({
+          customer: customerId,
+          return_url: `${request.headers.get("origin")}/account`,
+        });
+
+        return NextResponse.json({ url: portalSession.url });
+      }
+    } catch (stripeError) {
+      // Handle "no such customer" error (e.g., test mode customer in live mode)
+      if (
+        stripeError instanceof Error &&
+        stripeError.message.includes("No such customer")
+      ) {
+        // Create a new customer
+        const customer = await stripe.customers.create({
+          email: user.email || undefined,
+          metadata: { instantUserId: userId },
+        });
+        customerId = customer.id;
+
+        await adminDb.transact(
+          adminDb.tx.$users[userId].update({
+            stripeCustomerId: customerId,
+            subscriptionStatus: null,
+            cancelAt: null,
+          })
+        );
+      } else {
+        throw stripeError;
+      }
     }
 
     // Create checkout session for new subscription

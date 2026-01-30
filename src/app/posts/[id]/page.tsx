@@ -8,7 +8,6 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 
 type Post = InstaQLEntity<AppSchema, "posts">;
-type User = InstaQLEntity<AppSchema, "$users">;
 
 function formatDate(timestamp: number) {
   return new Date(timestamp).toLocaleDateString("en-US", {
@@ -18,7 +17,7 @@ function formatDate(timestamp: number) {
   });
 }
 
-function Paywall({ onSubscribe }: { onSubscribe: () => void }) {
+function Paywall({ onSubscribe, isLoading }: { onSubscribe: () => void; isLoading: boolean }) {
   return (
     <div className="mt-8 p-8 bg-gradient-to-b from-white to-amber-50 border border-amber-200 rounded-lg text-center">
       <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -45,27 +44,17 @@ function Paywall({ onSubscribe }: { onSubscribe: () => void }) {
       </p>
       <button
         onClick={onSubscribe}
-        className="px-6 py-3 bg-amber-500 text-white font-medium rounded-lg hover:bg-amber-600 transition-colors"
+        disabled={isLoading}
+        className="px-6 py-3 bg-amber-500 text-white font-medium rounded-lg hover:bg-amber-600 disabled:opacity-50 transition-colors"
       >
-        Subscribe Now
+        {isLoading ? "Redirecting..." : "Subscribe Now"}
       </button>
     </div>
   );
 }
 
-function PostContent({
-  post,
-  user,
-  userData,
-}: {
-  post: Post;
-  user: { id: string } | null;
-  userData: User | undefined;
-}) {
+function PostContent({ post, user }: { post: Post; user: { id: string } | null }) {
   const [isLoading, setIsLoading] = useState(false);
-
-  const isSubscribed = userData?.subscriptionStatus === "active";
-  const canViewContent = !post.isPremium || isSubscribed;
 
   async function handleSubscribe() {
     if (!user) {
@@ -87,10 +76,12 @@ function PostContent({
     } catch (err) {
       console.error("Checkout error:", err);
       alert("Failed to start checkout. Please try again.");
-    } finally {
       setIsLoading(false);
     }
   }
+
+  // Content is null if user doesn't have access (enforced by permissions)
+  const hasContent = post.content != null;
 
   return (
     <article className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -108,7 +99,7 @@ function PostContent({
 
         <h1 className="text-3xl font-bold text-gray-900 mb-6">{post.title}</h1>
 
-        {canViewContent ? (
+        {hasContent ? (
           <div className="prose prose-gray max-w-none">
             {post.content.split("\n\n").map((paragraph, i) => {
               if (paragraph.startsWith("**") && paragraph.endsWith("**")) {
@@ -146,12 +137,7 @@ function PostContent({
         ) : (
           <>
             <p className="text-gray-700 leading-relaxed mb-4">{post.teaser}</p>
-            <Paywall onSubscribe={handleSubscribe} />
-            {isLoading && (
-              <p className="text-center text-gray-500 mt-4">
-                Redirecting to checkout...
-              </p>
-            )}
+            <Paywall onSubscribe={handleSubscribe} isLoading={isLoading} />
           </>
         )}
       </div>
@@ -164,16 +150,11 @@ export default function PostPage() {
   const postId = params.id as string;
 
   const { isLoading: authLoading, user } = db.useAuth();
-  const { isLoading: postLoading, error: postError, data: postData } = db.useQuery({
+  const { isLoading: postLoading, error, data } = db.useQuery({
     posts: { $: { where: { id: postId } } },
   });
-  const { isLoading: userLoading, data: userData } = db.useQuery(
-    user ? { $users: { $: { where: { id: user.id } } } } : null
-  );
 
-  // Only wait for user data if we have a user
-  const isLoading = authLoading || postLoading || (user && userLoading);
-  const error = postError;
+  const isLoading = authLoading || postLoading;
 
   if (isLoading) {
     return (
@@ -219,8 +200,7 @@ export default function PostPage() {
     );
   }
 
-  const post = postData?.posts[0];
-  const currentUser = userData?.$users?.[0];
+  const post = data?.posts[0];
 
   if (!post) {
     return (
@@ -281,7 +261,7 @@ export default function PostPage() {
           Back to all posts
         </Link>
 
-        <PostContent post={post} user={user ?? null} userData={currentUser} />
+        <PostContent post={post} user={user ?? null} />
       </main>
     </div>
   );

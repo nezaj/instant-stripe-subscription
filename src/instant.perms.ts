@@ -7,8 +7,12 @@ const rules = {
     allow: {
       view: "true",
       create: "false",
-      update: "false",
       delete: "false",
+      update: "false",
+    },
+    bind: ["isSubscriber", "auth.subscriptionStatus == 'active'"],
+    fields: {
+      content: "!data.isPremium || isSubscriber",
     },
   },
 } satisfies InstantRules;
