@@ -118,3 +118,71 @@ To verify webhooks are working:
 | `4000 0000 0000 9995` | Declines (insufficient funds) |
 
 Full list: [Stripe testing docs](https://docs.stripe.com/testing)
+
+---
+
+## Testing Subscription Flows
+
+Make sure `stripe listen` is running and your app is on `localhost:3000`.
+
+### 1. Subscribe
+
+1. Sign in to the app
+2. Go to `/account` and click **Subscribe Now**
+3. Use card `4242 4242 4242 4242`, any future expiry, any CVC
+4. Complete checkout — you'll redirect back to `/account`
+5. Verify: green "Active Subscription" badge, premium posts are unlocked
+
+### 2. Cancel (with renewal option)
+
+1. Click **Manage Billing** → opens Stripe portal
+2. Click **Cancel plan** → confirm
+3. Back in the app, run sync to pull the updated state:
+   ```bash
+   export $(grep -v '^#' .env.local | xargs) && npx tsx scripts/sync-stripe.ts
+   ```
+4. Refresh `/account`
+5. Verify: yellow "Subscription Ending" badge with end date, **Renew Subscription** button
+6. Premium content should still be accessible until the end date
+
+### 3. Renew (undo cancellation)
+
+1. Click **Renew Subscription** → opens Stripe portal
+2. Click **Don't cancel subscription**
+3. Run sync again and refresh
+4. Verify: back to green "Active Subscription"
+
+### 4. Hard cancel (immediate revocation)
+
+Cancel the subscription in Stripe and sync local data:
+
+```bash
+export $(grep -v '^#' .env.local | xargs) && npx tsx scripts/cancel-subscription.ts you@email.com
+```
+
+Refresh `/account`:
+- Should show the amber "Subscribe" prompt
+- Premium posts should show paywall
+
+To test the locked-out state **without** touching Stripe (local only):
+
+```bash
+export $(grep -v '^#' .env.local | xargs) && npx tsx scripts/set-subscription.ts you@email.com canceled
+```
+
+### 5. Reset to active
+
+```bash
+export $(grep -v '^#' .env.local | xargs) && npx tsx scripts/set-subscription.ts you@email.com active
+```
+
+### Quick reference
+
+| Command | Result |
+|---------|--------|
+| `cancel-subscription.ts <email>` | Cancel in Stripe + sync locally |
+| `sync-stripe.ts [email]` | Pull real state from Stripe |
+| `set-subscription.ts <email> active` | Local only: full access, green badge |
+| `set-subscription.ts <email> canceling` | Local only: access until fake date (7 days), yellow badge |
+| `set-subscription.ts <email> canceled` | Local only: no access, subscribe prompt |
+| `set-subscription.ts <email> none` | Local only: clear subscription data |

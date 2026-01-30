@@ -38,7 +38,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create checkout session
+    // Check for existing active subscription
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "active",
+      limit: 1,
+    });
+
+    const existing = subscriptions.data[0] as
+      | (typeof subscriptions.data)[0] & { cancel_at: number | null }
+      | undefined;
+
+    if (existing) {
+      // Sync local data with Stripe
+      await adminDb.transact(
+        adminDb.tx.$users[userId].update({
+          subscriptionStatus: existing.status,
+          cancelAt: existing.cancel_at,
+        })
+      );
+
+      // Send to portal to manage existing subscription
+      const portalSession = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: `${request.headers.get("origin")}/account`,
+      });
+
+      return NextResponse.json({ url: portalSession.url });
+    }
+
+    // Create checkout session for new subscription
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: "subscription",

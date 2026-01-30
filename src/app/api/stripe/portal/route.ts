@@ -23,8 +23,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create portal session
     const stripe = getStripe();
+
+    // Sync subscription status before opening portal
+    const subscriptions = await stripe.subscriptions.list({
+      customer: user.stripeCustomerId,
+      limit: 1,
+    });
+
+    const subscription = subscriptions.data[0] as
+      | (typeof subscriptions.data)[0] & { cancel_at: number | null }
+      | undefined;
+
+    await adminDb.transact(
+      adminDb.tx.$users[userId].update({
+        subscriptionStatus: subscription?.status ?? null,
+        cancelAt: subscription?.cancel_at ?? null,
+      })
+    );
+
+    // Create portal session
     const session = await stripe.billingPortal.sessions.create({
       customer: user.stripeCustomerId,
       return_url: `${request.headers.get("origin")}/account`,

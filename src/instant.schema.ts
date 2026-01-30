@@ -12,6 +12,7 @@ const _schema = i.schema({
       email: i.string().unique().indexed().optional(),
       stripeCustomerId: i.string().optional(),
       subscriptionStatus: i.string().optional(), // 'active' | 'canceled' | 'past_due' | undefined
+      cancelAt: i.number().optional(), // Unix timestamp when subscription will cancel
     }),
     posts: i.entity({
       title: i.string(),

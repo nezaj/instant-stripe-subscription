@@ -6,6 +6,7 @@
  *
  * Examples:
  *   pnpm tsx scripts/set-subscription.ts test@example.com active
+ *   pnpm tsx scripts/set-subscription.ts test@example.com canceling
  *   pnpm tsx scripts/set-subscription.ts test@example.com canceled
  *   pnpm tsx scripts/set-subscription.ts test@example.com none
  */
@@ -24,7 +25,7 @@ async function main() {
 
   if (!email || !status) {
     console.log("Usage: pnpm tsx scripts/set-subscription.ts <email> <status>");
-    console.log("Status options: active, canceled, past_due, none");
+    console.log("Status options: active, canceling, canceled, none");
     process.exit(1);
   }
 
@@ -38,10 +39,26 @@ async function main() {
     process.exit(1);
   }
 
+  // "canceling" = active but scheduled to cancel
+  if (status === "canceling") {
+    const cancelAt = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60; // 7 days from now
+    await adminDb.transact(
+      adminDb.tx.$users[user.id].update({
+        subscriptionStatus: "active",
+        cancelAt,
+      })
+    );
+    console.log(`Updated ${email}: canceling (ends ${new Date(cancelAt * 1000).toLocaleDateString()})`);
+    return;
+  }
+
   const newStatus = status === "none" ? null : status;
 
   await adminDb.transact(
-    adminDb.tx.$users[user.id].update({ subscriptionStatus: newStatus })
+    adminDb.tx.$users[user.id].update({
+      subscriptionStatus: newStatus,
+      cancelAt: null,
+    })
   );
 
   console.log(`Updated ${email}: subscriptionStatus = ${newStatus ?? "(cleared)"}`);

@@ -25,14 +25,19 @@ export async function POST(request: NextRequest) {
         const userId = session.metadata?.instantUserId;
         if (userId) {
           await adminDb.transact(
-            adminDb.tx.$users[userId].update({ subscriptionStatus: "active" })
+            adminDb.tx.$users[userId].update({
+              subscriptionStatus: "active",
+              cancelAt: null,
+            })
           );
         }
         break;
       }
 
       case "customer.subscription.updated": {
-        const subscription = event.data.object as Stripe.Subscription;
+        const subscription = event.data.object as Stripe.Subscription & {
+          cancel_at: number | null;
+        };
         const customerId = subscription.customer as string;
 
         // Find user by Stripe customer ID
@@ -44,6 +49,7 @@ export async function POST(request: NextRequest) {
           await adminDb.transact(
             adminDb.tx.$users[$users[0].id].update({
               subscriptionStatus: subscription.status,
+              cancelAt: subscription.cancel_at,
             })
           );
         }
