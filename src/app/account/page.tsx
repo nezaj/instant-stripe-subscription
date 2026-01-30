@@ -5,7 +5,7 @@ import { type AppSchema } from "@/instant.schema";
 import { InstaQLEntity } from "@instantdb/react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 
 type User = InstaQLEntity<AppSchema, "$users">;
 
@@ -248,6 +248,17 @@ function AccountContent() {
   );
 
   const userData = data?.$users?.[0];
+
+  // Sync with Stripe on success to avoid race condition with webhook
+  useEffect(() => {
+    if (success && user) {
+      fetch("/api/stripe/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id }),
+      }).catch(console.error);
+    }
+  }, [success, user]);
 
   if (authLoading) {
     return (
